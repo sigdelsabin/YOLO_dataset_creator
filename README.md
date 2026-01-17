@@ -1,15 +1,14 @@
 # YOLO_dataset_creator
 If you have a shapefile of bounding boxes and a tif image and want to create YOLO dataset. We can use this.
 
-
 C:\User\
 ├── composites\
-│   └── Input_directory\
+│   └── Input_files\
 │       ├── image1.tif
 │       ├── image2.tif
 │       └── image3.tif
 ├── labels.shp
-└── YOLO_Datasets\          ← All outputs here
+└── YOLO_Datasets\            # All YOLO outputs
     ├── Dataset_image1\
     │   ├── train\
     │   ├── valid\
@@ -25,3 +24,4 @@ C:\User\
         ├── valid\
         ├── test\
         └── data.yaml
+
