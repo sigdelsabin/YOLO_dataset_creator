@@ -1,7 +1,8 @@
 """
-YOLO Dataset Creator Module
-============================
-A class-based module for creating YOLO datasets from GeoTIFF + Shapefile.
+YOLO Dataset Creator Module with Normalization
+===============================================
+A class-based module for creating YOLO datasets from GeoTIFF + Shapefile
+with P2-P98 Min-Max normalization support.
 
 Usage:
 ------
@@ -16,6 +17,8 @@ creator = YoloDatasetFromShp(
     valid_ratio=0.1,
     test_ratio=0.1,
     class_names=["ifa_mound"],
+    normalize=True,  # Enable normalization
+    norm_mode="global",  # or "local" or None
     random_seed=42
 )
 
@@ -28,7 +31,7 @@ import numpy as np
 import geopandas as gpd
 from osgeo import gdal
 from shapely.geometry import box
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Literal
 
 gdal.UseExceptions()
 
@@ -46,6 +49,8 @@ class YoloDatasetFromShp:
         valid_ratio (float): Validation set ratio (default: 0.1)
         test_ratio (float): Test set ratio (default: 0.1)
         class_names (List[str]): List of class names (default: ["object"])
+        normalize (bool): Apply P2-P98 normalization (default: False)
+        norm_mode (str): "global" or "local" normalization (default: "global")
         random_seed (int): Random seed for reproducibility (default: 42)
     """
     
@@ -59,6 +64,8 @@ class YoloDatasetFromShp:
         valid_ratio: float = 0.1,
         test_ratio: float = 0.1,
         class_names: Optional[List[str]] = None,
+        normalize: bool = False,
+        norm_mode: Literal["global", "local"] = "global",
         random_seed: int = 42
     ):
         """
@@ -73,6 +80,8 @@ class YoloDatasetFromShp:
             valid_ratio: Proportion of data for validation (0-1)
             test_ratio: Proportion of data for testing (0-1)
             class_names: List of class names for detection
+            normalize: Whether to apply P2-P98 normalization
+            norm_mode: "global" (whole image) or "local" (per-crop)
             random_seed: Random seed for reproducible splits
         """
         self.input_tif = input_tif
@@ -83,6 +92,8 @@ class YoloDatasetFromShp:
         self.valid_ratio = valid_ratio
         self.test_ratio = test_ratio
         self.class_names = class_names or ["object"]
+        self.normalize = normalize
+        self.norm_mode = norm_mode
         self.random_seed = random_seed
         
         # Validate ratios
@@ -90,6 +101,12 @@ class YoloDatasetFromShp:
         if not np.isclose(total_ratio, 1.0):
             raise ValueError(
                 f"Split ratios must sum to 1.0, got {total_ratio:.3f}"
+            )
+        
+        # Validate normalization mode
+        if normalize and norm_mode not in ["global", "local"]:
+            raise ValueError(
+                f"norm_mode must be 'global' or 'local', got '{norm_mode}'"
             )
         
         # Set random seeds
@@ -100,6 +117,7 @@ class YoloDatasetFromShp:
         self._ds = None
         self._gdf = None
         self._samples = []
+        self._global_percentiles = None  # Store global P2/P98 values
         self._stats = {
             'total_polygons': 0,
             'valid_crops': 0,
@@ -137,6 +155,80 @@ class YoloDatasetFromShp:
         height = (ymax - ymin) / img_h
         return x_center, y_center, width, height
     
+    def _compute_global_percentiles(self):
+        """Compute P2 and P98 percentiles for the entire image."""
+        if not self.normalize or self.norm_mode != "global":
+            return
+        
+        print("📊 Computing global P2/P98 percentiles...")
+        
+        bands = self._ds.RasterCount
+        width = self._ds.RasterXSize
+        height = self._ds.RasterYSize
+        
+        self._global_percentiles = []
+        
+        for b in range(1, bands + 1):
+            band = self._ds.GetRasterBand(b)
+            
+            # Sample image for large files (use every 10th pixel)
+            if width * height > 10_000_000:
+                step = 10
+                sample = band.ReadAsArray(
+                    0, 0, width, height
+                )[::step, ::step].flatten()
+            else:
+                sample = band.ReadAsArray().flatten()
+            
+            # Remove potential nodata values
+            sample = sample[np.isfinite(sample)]
+            
+            p2 = np.percentile(sample, 2)
+            p98 = np.percentile(sample, 98)
+            
+            self._global_percentiles.append((p2, p98))
+            print(f"   • Band {b}: P2={p2:.2f}, P98={p98:.2f}")
+        
+        print()
+    
+    def _normalize_crop(self, crop_data: np.ndarray) -> np.ndarray:
+        """
+        Apply P2-P98 Min-Max normalization to crop data.
+        
+        Args:
+            crop_data: Array of shape (bands, height, width)
+        
+        Returns:
+            Normalized array scaled to [0, 255] as uint8
+        """
+        if not self.normalize:
+            return crop_data
+        
+        normalized = np.zeros_like(crop_data, dtype=np.float32)
+        
+        for b in range(crop_data.shape[0]):
+            band_data = crop_data[b].astype(np.float32)
+            
+            if self.norm_mode == "global":
+                # Use pre-computed global percentiles
+                p2, p98 = self._global_percentiles[b]
+            else:  # local
+                # Compute percentiles for this specific crop
+                p2 = np.percentile(band_data, 2)
+                p98 = np.percentile(band_data, 98)
+            
+            # Min-Max normalization
+            if p98 > p2:
+                normalized[b] = np.clip(
+                    (band_data - p2) / (p98 - p2) * 255.0,
+                    0, 255
+                )
+            else:
+                # Handle edge case where p2 == p98
+                normalized[b] = band_data
+        
+        return normalized.astype(np.uint8)
+    
     def _create_directory_structure(self):
         """Create YOLO dataset directory structure."""
         for split in ["train", "valid", "test"]:
@@ -160,6 +252,10 @@ test: test/images
 
 nc: {len(self.class_names)}
 names: {self.class_names}
+
+# Normalization settings
+normalized: {self.normalize}
+norm_mode: {self.norm_mode if self.normalize else 'none'}
 """
         yaml_path = os.path.join(self.output_dir, "data.yaml")
         with open(yaml_path, "w") as f:
@@ -198,7 +294,11 @@ names: {self.class_names}
         ].copy()
         
         self._stats['total_polygons'] = len(self._gdf)
-        print(f"   • Polygons in bounds: {self._stats['total_polygons']}\n")
+        print(f"   • Polygons in bounds: {self._stats['total_polygons']}")
+        print(f"   • Normalization: {self.norm_mode if self.normalize else 'disabled'}\n")
+        
+        # Compute global percentiles if needed
+        self._compute_global_percentiles()
     
     def _generate_crops(self):
         """Generate image crops centered on labeled objects."""
@@ -254,7 +354,10 @@ names: {self.class_names}
                 )
                 crop_data.append(band_arr)
             
-            crop_data = np.stack(crop_data, axis=0).astype(np.uint8)
+            crop_data = np.stack(crop_data, axis=0)
+            
+            # Apply normalization
+            crop_data = self._normalize_crop(crop_data)
             
             # Convert polygons to YOLO format
             yolo_labels = []
@@ -393,7 +496,10 @@ names: {self.class_names}
             print(f"   • Valid crops: {self._stats['valid_crops']}")
             print(f"   • Train samples: {self._stats['train_samples']}")
             print(f"   • Valid samples: {self._stats['valid_samples']}")
-            print(f"   • Test samples: {self._stats['test_samples']}\n")
+            print(f"   • Test samples: {self._stats['test_samples']}")
+            if self.normalize:
+                print(f"   • Normalization: {self.norm_mode} P2-P98")
+            print()
             
         finally:
             # Cleanup
@@ -418,6 +524,8 @@ if __name__ == "__main__":
     """
     Example usage - Replace paths with your actual files
     """
+    
+    # Example 1: With global normalization
     creator = YoloDatasetFromShp(
         input_tif="path/to/your/thermal_stack.tif",
         input_shp="path/to/your/labels.shp",
@@ -426,11 +534,38 @@ if __name__ == "__main__":
         train_ratio=0.8,
         valid_ratio=0.1,
         test_ratio=0.1,
-        class_names=["your_class_name"],
+        class_names=["ifa_mound"],
+        normalize=True,
+        norm_mode="global",  # Use global P2/P98 from entire image
         random_seed=42
     )
     
     creator.create_dataset()
+    
+    # Example 2: With local normalization
+    # creator = YoloDatasetFromShp(
+    #     input_tif="path/to/your/thermal_stack.tif",
+    #     input_shp="path/to/your/labels.shp",
+    #     output_dir="path/to/output/directory_local",
+    #     crop_size=640,
+    #     normalize=True,
+    #     norm_mode="local",  # Compute P2/P98 for each crop individually
+    #     class_names=["ifa_mound"],
+    #     random_seed=42
+    # )
+    # creator.create_dataset()
+    
+    # Example 3: Without normalization (original behavior)
+    # creator = YoloDatasetFromShp(
+    #     input_tif="path/to/your/thermal_stack.tif",
+    #     input_shp="path/to/your/labels.shp",
+    #     output_dir="path/to/output/directory_raw",
+    #     crop_size=640,
+    #     normalize=False,  # No normalization
+    #     class_names=["ifa_mound"],
+    #     random_seed=42
+    # )
+    # creator.create_dataset()
     
     # Get statistics
     stats = creator.get_stats()
