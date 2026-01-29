@@ -41,24 +41,7 @@ Solution: If we have a **shapefile of labels and dataset directory**, we can use
 
 **Note:** `train_ratio + valid_ratio + test_ratio` must equal 1.0
 
-## Example Usage
 
-```python
-from yolo_dataset_creator import YoloDatasetFromShp
-
-creator = YoloDatasetFromShp(
-    input_tif="path/to/thermal_stack.tif",
-    input_shp="path/to/labels.shp",
-    output_dir="path/to/output",
-    crop_size=640,
-    train_ratio=0.8,
-    valid_ratio=0.1,
-    test_ratio=0.1,
-    class_names=["ifa_mound"],
-    random_seed=42
-)
-
-creator.create_dataset()
 ```
 # This is the general structure how the code create the output
 
