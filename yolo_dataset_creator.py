@@ -160,7 +160,7 @@ class YoloDatasetFromShp:
         if not self.normalize or self.norm_mode != "global":
             return
         
-        print("📊 Computing global P2/P98 percentiles...")
+        print(" Computing global P2/P98 percentiles...")
         
         bands = self._ds.RasterCount
         width = self._ds.RasterXSize
@@ -570,4 +570,5 @@ if __name__ == "__main__":
     # Get statistics
     stats = creator.get_stats()
     print(f"Dataset created with {stats['valid_crops']} total samples")
+
 
