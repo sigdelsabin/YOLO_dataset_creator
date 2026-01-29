@@ -263,7 +263,7 @@ norm_mode: {self.norm_mode if self.normalize else 'none'}
     
     def _load_data(self):
         """Load GeoTIFF and shapefile data."""
-        print("📂 Loading input data...")
+        print(" Loading input data...")
         
         # Load GeoTIFF
         self._ds = gdal.Open(self.input_tif)
@@ -302,7 +302,7 @@ norm_mode: {self.norm_mode if self.normalize else 'none'}
     
     def _generate_crops(self):
         """Generate image crops centered on labeled objects."""
-        print(f"🔨 Generating {self.crop_size}x{self.crop_size} crops...")
+        print(f" Generating {self.crop_size}x{self.crop_size} crops...")
         
         width = self._ds.RasterXSize
         height = self._ds.RasterYSize
@@ -406,7 +406,7 @@ norm_mode: {self.norm_mode if self.normalize else 'none'}
     
     def _split_dataset(self):
         """Split samples into train/valid/test sets."""
-        print("✂️  Splitting dataset...")
+        print("  Splitting dataset...")
         
         random.shuffle(self._samples)
         
@@ -428,7 +428,7 @@ norm_mode: {self.norm_mode if self.normalize else 'none'}
     
     def _save_samples(self):
         """Save samples to disk."""
-        print("💾 Saving dataset...")
+        print(" Saving dataset...")
         
         bands = self._ds.RasterCount
         
@@ -487,11 +487,11 @@ norm_mode: {self.norm_mode if self.normalize else 'none'}
             
             # Print summary
             print(f"\n{'='*60}")
-            print("✅ YOLO Dataset Created Successfully!")
+            print(" YOLO Dataset Created Successfully!")
             print(f"{'='*60}")
-            print(f"\n📍 Dataset location: {self.output_dir}")
-            print(f"📄 Configuration: {os.path.join(self.output_dir, 'data.yaml')}")
-            print(f"\n📊 Dataset Statistics:")
+            print(f"\n Dataset location: {self.output_dir}")
+            print(f" Configuration: {os.path.join(self.output_dir, 'data.yaml')}")
+            print(f"\n Dataset Statistics:")
             print(f"   • Total polygons: {self._stats['total_polygons']}")
             print(f"   • Valid crops: {self._stats['valid_crops']}")
             print(f"   • Train samples: {self._stats['train_samples']}")
@@ -570,3 +570,4 @@ if __name__ == "__main__":
     # Get statistics
     stats = creator.get_stats()
     print(f"Dataset created with {stats['valid_crops']} total samples")
+
